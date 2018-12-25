@@ -1,0 +1,87 @@
+#!/bin/bash
+
+## Get the current date as variable.
+TODAY="$(date +%Y-%m-%d)"
+
+## Delete backup files older than 2 weeks before create the new one.
+find /var/backup/ -mtime +14 -type f -delete
+
+## Tar Section. Create a backup file, with the current date in its name.
+## Add -h to convert the symbolic links into a regular files.
+## Backup some system files, also the entire `/home` directory, etc.
+## --exclude some directories, for example the the browser's cache, `.bash_history`, etc.
+tar zcvf "/var/backup/my-backup-$TODAY.tgz" \
+/etc/hosts /etc/sudoers* /var/spool/cron/crontabs /etc/cron* \
+/etc/apache2 /etc/letsencrypt /etc/php/7.0/apache2/php.ini \
+/etc/phpmyadmin/apache.conf /etc/mysql/debian.cnf \
+/etc/ssh/sshd_config* /etc/pam.d/sshd \
+/usr/local/bin \
+/var/backup/mysql-all-db.sql.gz /var/lib/automysqlbackup/latest/*.sql.gz \
+/root \
+/home \
+/var/www \
+
+
+# Shell script to backup MySQL database
+
+# Set these variables
+MyUSER="dbuser"     # DB_USERNAME
+MyPASS="dbpass" # DB_PASSWORD
+MyHOST="localhost"      # DB_HOSTNAME
+
+# Backup Dest directory
+DEST="/var/backup" # /var/backups/DB
+
+# Email for notifications
+EMAIL="name@example.com"
+
+# How many days old files must be to be removed
+DAYS=30
+
+# Linux bin paths
+MYSQL="$(which mysql)"
+MYSQLDUMP="$(which mysqldump)"
+GZIP="$(which gzip)"
+
+# Get date in dd-mm-yyyy format
+NOW="$(date +"%d-%m-%Y_%s")"
+
+# Create Backup sub-directories
+MBD="$DEST/$NOW/mysql"
+install -d $MBD
+
+# DB skip list
+SKIP="information_schema
+another_one_db"
+
+# Get all databases
+DBS="$($MYSQL -h $MyHOST -u $MyUSER -p$MyPASS -Bse 'show databases')"
+
+# Archive database dumps
+for db in $DBS
+do
+    skipdb=-1
+    if [ "$SKIP" != "" ];
+    then
+                for i in $SKIP
+                do
+                        [ "$db" == "$i" ] && skipdb=1 || :
+                done
+    fi
+
+    if [ "$skipdb" == "-1" ] ; then
+        FILE="$MBD/$db.sql"
+        $MYSQLDUMP -h $MyHOST -u $MyUSER -p$MyPASS $db > $FILE
+    fi
+done
+
+# Archive the directory, send mail and cleanup
+cd $DEST
+tar -cf $NOW.tar $NOW
+$GZIP -9 $NOW.tar
+
+echo "MySQL backup is completed! Backup name is $NOW.tar.gz" | mail -s "MySQL backup" $EMAIL
+rm -rf $NOW
+
+# Remove old files
+find $DEST -mtime +$DAYS -exec rm -f {} \;
